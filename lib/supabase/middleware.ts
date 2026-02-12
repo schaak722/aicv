@@ -1,11 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
-/**
- * Keeps Supabase session cookie in sync (important for SSR).
- * Pattern follows Supabase SSR guidance.
- */
-export async function updateSession(request: NextRequest) {
+// This file is used by middleware.ts (root) to keep the Supabase session in sync.
+export function createSupabaseMiddlewareClient(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -16,18 +13,22 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(
+          cookiesToSet: Array<{
+            name: string;
+            value: string;
+            options?: CookieOptions;
+          }>
+        ) {
           cookiesToSet.forEach(({ name, value, options }) => {
+            // Keep request + response cookies aligned
             request.cookies.set(name, value);
             response.cookies.set(name, value, options);
           });
-        }
-      }
+        },
+      },
     }
   );
 
-  // Refresh session if needed
-  await supabase.auth.getUser();
-
-  return response;
+  return { supabase, response };
 }
