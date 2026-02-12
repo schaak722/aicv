@@ -2,8 +2,8 @@ import { cookies } from "next/headers";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
 /**
- * Server-side Supabase client (App Router).
  * Next.js 16: cookies() returns a Promise, so we must await it.
+ * This returns a server-side Supabase client bound to request cookies.
  */
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
@@ -31,3 +31,8 @@ export async function createSupabaseServerClient() {
     }
   );
 }
+
+/**
+ * Backwards-compatible export (your app imports this name in multiple places).
+ */
+export const createServerSupabase = createSupabaseServerClient;
