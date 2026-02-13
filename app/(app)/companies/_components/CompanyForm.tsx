@@ -27,15 +27,16 @@ export default function CompanyForm(props: Props) {
   const router = useRouter();
 
   const readOnly = props.role === "CLIENT";
-  const canEdit = props.role !== "CLIENT";
+
+  // Make companyId safe & stable for TS across hooks
+  const companyId = props.mode === "edit" ? props.companyId : null;
 
   const [loading, setLoading] = useState(props.mode === "edit");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  const [id, setId] = useState<string | null>(props.mode === "edit" ? props.companyId : null);
-
+  const [id, setId] = useState<string | null>(companyId);
   const [refId, setRefId] = useState("");
   const [name, setName] = useState("");
   const [industry, setIndustry] = useState("");
@@ -48,19 +49,18 @@ export default function CompanyForm(props: Props) {
 
   const logoPreviewUrl = useMemo(() => {
     if (logoFile) return URL.createObjectURL(logoFile);
-    if (props.mode === "edit" && id && hasLogo && !removeLogo) return `/api/companies/${id}/logo`;
+    if (companyId && id && hasLogo && !removeLogo) return `/api/companies/${id}/logo`;
     return null;
-  }, [logoFile, props.mode, id, hasLogo, removeLogo]);
+  }, [logoFile, companyId, id, hasLogo, removeLogo]);
 
   useEffect(() => {
     return () => {
-      if (logoFile) URL.revokeObjectURL(logoPreviewUrl || "");
+      if (logoFile && logoPreviewUrl) URL.revokeObjectURL(logoPreviewUrl);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logoFile]);
+  }, [logoFile, logoPreviewUrl]);
 
   useEffect(() => {
-    if (props.mode !== "edit") return;
+    if (!companyId) return;
 
     let cancelled = false;
 
@@ -68,7 +68,7 @@ export default function CompanyForm(props: Props) {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`/api/companies/${props.companyId}`, { cache: "no-store" });
+        const res = await fetch(`/api/companies/${companyId}`, { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "Failed to load company");
 
@@ -97,7 +97,7 @@ export default function CompanyForm(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [props]);
+  }, [companyId]);
 
   async function onSave() {
     setErr(null);
@@ -125,18 +125,26 @@ export default function CompanyForm(props: Props) {
     setSaving(true);
 
     try {
-      const url = props.mode === "create" ? "/api/companies" : `/api/companies/${props.companyId}`;
+      const url =
+        props.mode === "create"
+          ? "/api/companies"
+          : `/api/companies/${companyId ?? ""}`;
+
       const method = props.mode === "create" ? "POST" : "PUT";
+
+      if (props.mode === "edit" && !companyId) {
+        throw new Error("Missing companyId for edit mode");
+      }
 
       const res = await fetch(url, { method, body: fd });
       const json = await res.json().catch(() => ({} as any));
       if (!res.ok) throw new Error(json?.error || "Save failed");
 
       if (props.mode === "create") {
-        const companyId = json?.company?.id;
+        const newId = json?.company?.id;
         setOkMsg("Company created.");
-        if (companyId) {
-          router.push(`/companies/${companyId}`);
+        if (newId) {
+          router.push(`/companies/${newId}`);
           router.refresh();
           return;
         }
@@ -146,7 +154,6 @@ export default function CompanyForm(props: Props) {
         setOkMsg("Saved.");
         setLogoFile(null);
         setRemoveLogo(false);
-        // Force logo refresh
         setHasLogo(!removeLogo || Boolean(logoFile));
         router.refresh();
       }
@@ -157,9 +164,7 @@ export default function CompanyForm(props: Props) {
     }
   }
 
-  if (loading) {
-    return <div style={{ color: "var(--muted)" }}>Loading…</div>;
-  }
+  if (loading) return <div style={{ color: "var(--muted)" }}>Loading…</div>;
 
   return (
     <div className="grid" style={{ gap: 14 }}>
@@ -217,76 +222,67 @@ export default function CompanyForm(props: Props) {
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>Logo</div>
-            <div
-              style={{
-                width: 70,
-                height: 70,
-                borderRadius: 14,
-                border: "1px solid var(--line)",
-                background: "rgba(255,255,255,0.03)",
-                overflow: "hidden",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-            >
-              {logoPreviewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoPreviewUrl} alt="" width={70} height={70} style={{ objectFit: "cover" }} />
-              ) : (
-                <span style={{ color: "var(--muted)", fontSize: 12 }}>—</span>
-              )}
-            </div>
+            {logoPreviewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoPreviewUrl}
+                alt="Logo"
+                width={70}
+                height={70}
+                style={{ borderRadius: 10, border: "1px solid var(--border)", objectFit: "contain", background: "#fff" }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 70,
+                  height: 70,
+                  borderRadius: 10,
+                  border: "1px dashed var(--border)",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--muted)",
+                  fontSize: 12,
+                }}
+              >
+                No logo
+              </div>
+            )}
           </div>
 
-          <div style={{ minWidth: 280 }}>
-            <div className="notice" style={{ marginBottom: 10 }}>
-              PNG/JPEG only • ≤200KB • Displayed as 70×70
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              disabled={readOnly}
+              onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+            />
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+              PNG/JPEG only. Recommended ≤ 200KB. Displayed as 70×70.
             </div>
-
-            {canEdit && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {props.mode === "edit" && hasLogo && !readOnly && (
+              <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginTop: 8 }}>
                 <input
-                  type="file"
-                  accept="image/png,image/jpeg"
-                  disabled={saving}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setLogoFile(f);
-                    setRemoveLogo(false);
-                  }}
+                  type="checkbox"
+                  checked={removeLogo}
+                  onChange={(e) => setRemoveLogo(e.target.checked)}
+                  disabled={readOnly}
                 />
-
-                {props.mode === "edit" && hasLogo && (
-                  <label style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--muted)" }}>
-                    <input
-                      type="checkbox"
-                      checked={removeLogo}
-                      disabled={saving}
-                      onChange={(e) => {
-                        setRemoveLogo(e.target.checked);
-                        if (e.target.checked) setLogoFile(null);
-                      }}
-                    />
-                    Remove existing logo
-                  </label>
-                )}
-              </div>
+                Remove logo
+              </label>
             )}
           </div>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-        <button className="btn" onClick={() => router.push("/companies")}>
-          Back
-        </button>
-
-        {canEdit && (
-          <button className="btn primary" disabled={saving} onClick={onSave}>
+      <div style={{ display: "flex", gap: 10 }}>
+        {!readOnly && (
+          <button className="btn primary" onClick={onSave} disabled={saving}>
             {saving ? "Saving…" : props.mode === "create" ? "Create company" : "Save changes"}
           </button>
         )}
+        <button className="btn" onClick={() => router.push("/companies")} disabled={saving}>
+          Back
+        </button>
       </div>
     </div>
   );
