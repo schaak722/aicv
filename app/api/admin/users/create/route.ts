@@ -16,7 +16,7 @@ const BodySchema = z.object({
 
 export async function POST(req: Request) {
   // 1) Ensure requester is logged in
-  const supabase = createServerSupabase();
+  const supabase = await createServerSupabase();
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userData.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

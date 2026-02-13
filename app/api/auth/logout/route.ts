@@ -4,7 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const supabase = createServerSupabase();
+  const supabase = await createServerSupabase();
   await supabase.auth.signOut();
 
   const url = new URL(req.url);

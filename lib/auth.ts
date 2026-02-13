@@ -4,7 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 export type AppRole = "ADMIN" | "OPS" | "CLIENT";
 
 export async function requireUser() {
-  const supabase = createServerSupabase();
+  const supabase = await createServerSupabase();
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userData.user) {
