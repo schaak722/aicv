@@ -1,17 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type AppRole = "ADMIN" | "OPS" | "CLIENT";
-
 type JobStatus = "ACTIVE" | "INACTIVE";
 
-type CompanyOption = {
-  id: string;
-  name: string;
-  ref_id: string;
-};
+type CompanyOption = { id: string; ref_id: string; name: string };
 
 type Job = {
   id: string;
@@ -22,19 +17,30 @@ type Job = {
   seniority: string | null;
   salary_band: string | null;
   status: JobStatus;
-  updated_at: string;
 };
 
 type Props =
   | { mode: "create"; role: AppRole }
   | { mode: "edit"; role: AppRole; jobId: string };
 
+const BASIS = ["Full-Time", "Part-Time", "Freelance", "Hybrid", "Temporary"];
+const SENIORITY = ["Entry Level", "Mid Level", "Senior Level"];
+const SALARY_BANDS = [
+  "Any",
+  "€11,532 - €16,000",
+  "€16,000 - €20,000",
+  "€20,000 - €24,000",
+  "€24,000 - €30,000",
+  "€30,000 - €45,000",
+  "€45,000 - €60,000",
+  "€60,000 - €80,000",
+  "€80,000 or more",
+];
+
 export default function JobForm(props: Props) {
   const router = useRouter();
-
   const readOnly = props.role === "CLIENT";
-
-  // ✅ Make jobId stable & safe for TS
+  const canEditStatus = props.role === "ADMIN" || props.role === "OPS";
   const jobId = props.mode === "edit" ? props.jobId : null;
 
   const [loading, setLoading] = useState(props.mode === "edit");
@@ -42,51 +48,68 @@ export default function JobForm(props: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  // company selection (typeahead)
   const [companyId, setCompanyId] = useState("");
+  const [companyQuery, setCompanyQuery] = useState("");
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const companyBoxRef = useRef<HTMLDivElement | null>(null);
+
+  // job fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [basis, setBasis] = useState("");
-  const [seniority, setSeniority] = useState("");
-  const [salaryBand, setSalaryBand] = useState("");
+  const [basis, setBasis] = useState(BASIS[0]);
+  const [seniority, setSeniority] = useState(SENIORITY[1]);
+  const [salaryBand, setSalaryBand] = useState(SALARY_BANDS[0]);
   const [status, setStatus] = useState<JobStatus>("ACTIVE");
 
-  const canEditStatus = props.role === "ADMIN" || props.role === "OPS";
+  // Close dropdown on outside click
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!companyBoxRef.current) return;
+      if (!companyBoxRef.current.contains(e.target as Node)) setCompanyOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
 
-  const statusBadge = useMemo(() => {
-    return status === "ACTIVE" ? "badge" : "badge";
-  }, [status]);
-
-  // Load company dropdown options
+  // Search companies as user types
   useEffect(() => {
     let cancelled = false;
 
-    async function loadCompanies() {
+    async function searchCompanies() {
+      const q = companyQuery.trim();
+      if (!q) {
+        setCompanyOptions([]);
+        return;
+      }
+
       try {
-        const res = await fetch("/api/companies/options", { cache: "no-store" });
+        const res = await fetch(`/api/companies/options?q=${encodeURIComponent(q)}`, { cache: "no-store" });
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || "Failed to load companies");
-        if (!cancelled) setCompanies(json.options ?? []);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message ?? "Failed to load companies");
+        if (!res.ok) throw new Error(json?.error || "Failed to search companies");
+        if (!cancelled) setCompanyOptions(json.options ?? []);
+      } catch {
+        if (!cancelled) setCompanyOptions([]);
       }
     }
 
-    loadCompanies();
+    const t = setTimeout(searchCompanies, 250);
     return () => {
       cancelled = true;
+      clearTimeout(t);
     };
-  }, []);
+  }, [companyQuery]);
 
-  // Load job when edit
+  // Load job in edit mode
   useEffect(() => {
     if (!jobId) return;
-
     let cancelled = false;
 
     async function loadJob() {
       setLoading(true);
       setErr(null);
+
       try {
         const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
         const json = await res.json();
@@ -97,11 +120,12 @@ export default function JobForm(props: Props) {
         if (cancelled) return;
 
         setCompanyId(j.company_id);
+        // We don’t necessarily know the company name here; user can leave it locked on edit.
         setTitle(j.title);
         setDescription(j.description ?? "");
-        setBasis(j.basis ?? "");
-        setSeniority(j.seniority ?? "");
-        setSalaryBand(j.salary_band ?? "");
+        setBasis(j.basis ?? BASIS[0]);
+        setSeniority(j.seniority ?? SENIORITY[1]);
+        setSalaryBand(j.salary_band ?? SALARY_BANDS[0]);
         setStatus(j.status);
       } catch (e: any) {
         if (!cancelled) setErr(e?.message ?? "Failed to load job");
@@ -115,6 +139,12 @@ export default function JobForm(props: Props) {
       cancelled = true;
     };
   }, [jobId]);
+
+  const companyLabel = useMemo(() => {
+    if (!companyId) return "";
+    const found = companyOptions.find((c) => c.id === companyId);
+    return found ? `${found.ref_id} — ${found.name}` : "";
+  }, [companyId, companyOptions]);
 
   async function onSave() {
     setErr(null);
@@ -137,19 +167,18 @@ export default function JobForm(props: Props) {
     setSaving(true);
 
     try {
-      const payload = {
+      const payload: any = {
         company_id: companyId,
         title: title.trim(),
         description: description.trim() || null,
-        basis: basis.trim() || null,
-        seniority: seniority.trim() || null,
-        salary_band: salaryBand.trim() || null,
-        status: canEditStatus ? status : undefined,
+        basis,
+        seniority,
+        salary_band: salaryBand,
       };
+      if (canEditStatus) payload.status = status;
 
       const url = props.mode === "create" ? "/api/jobs" : `/api/jobs/${jobId ?? ""}`;
       const method = props.mode === "create" ? "POST" : "PUT";
-
       if (props.mode === "edit" && !jobId) throw new Error("Missing jobId for edit mode");
 
       const res = await fetch(url, {
@@ -190,22 +219,75 @@ export default function JobForm(props: Props) {
       {okMsg && <div className="notice">{okMsg}</div>}
 
       <div className="grid cols-2">
-        <div>
+        <div ref={companyBoxRef} style={{ position: "relative" }}>
           <label style={{ fontSize: 13, color: "var(--muted)" }}>Company</label>
-          <select
-            className="input"
-            value={companyId}
-            disabled={readOnly || props.mode === "edit"} /* lock company on edit */
-            onChange={(e) => setCompanyId(e.target.value)}
-          >
-            <option value="">Select a company…</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.ref_id} — {c.name}
-              </option>
-            ))}
-          </select>
-          <small>{props.mode === "edit" ? "Company cannot be changed after creation." : "Select the company for this job."}</small>
+
+          {props.mode === "edit" ? (
+            <input className="input" value={companyId} disabled readOnly />
+          ) : (
+            <>
+              <input
+                className="input"
+                placeholder="Search company by name or Ref ID…"
+                value={companyQuery}
+                disabled={readOnly}
+                onFocus={() => setCompanyOpen(true)}
+                onChange={(e) => {
+                  setCompanyQuery(e.target.value);
+                  setCompanyOpen(true);
+                }}
+              />
+
+              {companyOpen && companyQuery.trim() && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 72,
+                    left: 0,
+                    right: 0,
+                    zIndex: 50,
+                    background: "var(--panel)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 12,
+                    overflow: "hidden",
+                  }}
+                >
+                  {companyOptions.length === 0 && (
+                    <div style={{ padding: 10, color: "var(--muted)" }}>No matches…</div>
+                  )}
+
+                  {companyOptions.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="btn"
+                      style={{
+                        width: "100%",
+                        justifyContent: "flex-start",
+                        borderRadius: 0,
+                        border: "none",
+                        borderBottom: "1px solid var(--line)",
+                        background: "transparent",
+                      }}
+                      onClick={() => {
+                        setCompanyId(c.id);
+                        setCompanyQuery(`${c.ref_id} — ${c.name}`);
+                        setCompanyOpen(false);
+                      }}
+                    >
+                      <strong>{c.ref_id}</strong>&nbsp;— {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          <small>
+            {props.mode === "edit"
+              ? "Company cannot be changed after creation."
+              : "Type to search, then click a company to select it."}
+          </small>
         </div>
 
         <div>
@@ -243,17 +325,35 @@ export default function JobForm(props: Props) {
       <div className="grid cols-3">
         <div>
           <label style={{ fontSize: 13, color: "var(--muted)" }}>Basis</label>
-          <input className="input" value={basis} disabled={readOnly} onChange={(e) => setBasis(e.target.value)} placeholder="Full-Time" />
+          <select className="input" value={basis} disabled={readOnly} onChange={(e) => setBasis(e.target.value)}>
+            {BASIS.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>
           <label style={{ fontSize: 13, color: "var(--muted)" }}>Seniority</label>
-          <input className="input" value={seniority} disabled={readOnly} onChange={(e) => setSeniority(e.target.value)} placeholder="Mid Level" />
+          <select className="input" value={seniority} disabled={readOnly} onChange={(e) => setSeniority(e.target.value)}>
+            {SENIORITY.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>
           <label style={{ fontSize: 13, color: "var(--muted)" }}>Salary band</label>
-          <input className="input" value={salaryBand} disabled={readOnly} onChange={(e) => setSalaryBand(e.target.value)} placeholder="€30,000 - €45,000" />
+          <select className="input" value={salaryBand} disabled={readOnly} onChange={(e) => setSalaryBand(e.target.value)}>
+            {SALARY_BANDS.map((sb) => (
+              <option key={sb} value={sb}>
+                {sb}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
