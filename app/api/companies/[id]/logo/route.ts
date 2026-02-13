@@ -8,6 +8,11 @@ export const runtime = "nodejs";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
 
+type CompanyLogoRpcRow = {
+  logo_base64: string | null;
+  logo_mime: string | null;
+};
+
 export async function GET(_req: NextRequest, { params }: RouteContext<{ id: string }>) {
   const auth = await getApiAuth();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -29,7 +34,9 @@ export async function GET(_req: NextRequest, { params }: RouteContext<{ id: stri
     if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const { data, error } = await admin.rpc("get_company_logo", { p_company_id: parsedParams.data.id }).maybeSingle();
+  const { data, error } = await admin
+    .rpc<CompanyLogoRpcRow>("get_company_logo", { p_company_id: parsedParams.data.id })
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   if (!data?.logo_base64 || !data?.logo_mime) return NextResponse.json({ error: "Not found" }, { status: 404 });
