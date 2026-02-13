@@ -1,29 +1,49 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createAdminSupabase } from "@/lib/supabase/admin";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { getApiAuth } from "@/lib/server/apiAuth";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: NextRequest) {
+const QuerySchema = z.object({
+  q: z.string().optional(),
+});
+
+export async function GET(req: Request) {
   const auth = await getApiAuth();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const admin = createAdminSupabase();
+  const url = new URL(req.url);
+  const parsed = QuerySchema.safeParse({ q: url.searchParams.get("q") ?? undefined });
+  if (!parsed.success) return NextResponse.json({ error: "Invalid query" }, { status: 400 });
 
-  let allowedCompanyIds: string[] | null = null;
-  if (auth.role === "CLIENT") {
-    const { data: access, error: accessErr } = await admin.from("company_access").select("company_id").eq("user_id", auth.userId);
-    if (accessErr) return NextResponse.json({ error: accessErr.message }, { status: 500 });
+  const q = (parsed.data.q ?? "").trim();
+  const supabase = await createServerSupabase();
 
-    allowedCompanyIds = (access ?? []).map((r: any) => r.company_id as string);
-    if (allowedCompanyIds.length === 0) return NextResponse.json({ items: [] });
+  let query = supabase
+    .from("companies")
+    .select("id, ref_id, name")
+    .order("name", { ascending: true })
+    .limit(20);
+
+  if (q) {
+    // simple search on name/ref_id
+    query = query.or(`name.ilike.%${q}%,ref_id.ilike.%${q}%`);
   }
 
-  let query = admin.from("companies").select("id,ref_id,name").order("name", { ascending: true });
-  if (allowedCompanyIds) query = query.in("id", allowedCompanyIds);
+  // If CLIENT, restrict to assigned companies
+  if (auth.role === "CLIENT") {
+    const { data: access } = await supabase
+      .from("company_access")
+      .select("company_id")
+      .eq("user_id", auth.userId);
+
+    const ids = (access ?? []).map((x: any) => x.company_id);
+    query = query.in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+  }
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  return NextResponse.json({ items: data ?? [] });
+  return NextResponse.json({ options: data ?? [] });
 }
