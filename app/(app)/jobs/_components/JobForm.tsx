@@ -5,25 +5,23 @@ import { useRouter } from "next/navigation";
 
 type AppRole = "ADMIN" | "OPS" | "CLIENT";
 
-type CompanyOption = { id: string; ref_id: string; name: string };
+type JobStatus = "ACTIVE" | "INACTIVE";
+
+type CompanyOption = {
+  id: string;
+  name: string;
+  ref_id: string;
+};
 
 type Job = {
   id: string;
-  job_ref: string | null;
   company_id: string;
-  company_name: string;
-  company_ref_id: string;
-  position_title: string;
-  job_description: string;
-  location: string | null;
-  job_basis: string[];
-  salary_bands: string[];
-  seniority: "SENIOR" | "MID_LEVEL" | "JUNIOR_ENTRY";
-  categories: string[];
-  status: "ACTIVE" | "INACTIVE";
-  inactivated_reason: string | null;
-  inactivated_at: string | null;
-  created_at: string;
+  title: string;
+  description: string | null;
+  basis: string | null;
+  seniority: string | null;
+  salary_band: string | null;
+  status: JobStatus;
   updated_at: string;
 };
 
@@ -31,52 +29,35 @@ type Props =
   | { mode: "create"; role: AppRole }
   | { mode: "edit"; role: AppRole; jobId: string };
 
-const JOB_BASIS_OPTIONS: Array<[string, string]> = [["FULL_TIME", "Full-Time"], ["PART_TIME", "Part-Time"], ["FREELANCE", "Freelance"], ["HYBRID", "Hybrid"], ["TEMPORARY", "Temporary"]];
-const SALARY_BANDS_OPTIONS: Array<[string, string]> = [["ANY", "Any"], ["EUR_11532_16000", "\u20ac11,532 - \u20ac16,000"], ["EUR_16000_20000", "\u20ac16,000 - \u20ac20,000"], ["EUR_20000_24000", "\u20ac20,000 - \u20ac24,000"], ["EUR_24000_30000", "\u20ac24,000 - \u20ac30,000"], ["EUR_30000_45000", "\u20ac30,000 - \u20ac45,000"], ["EUR_45000_60000", "\u20ac45,000 - \u20ac60,000"], ["EUR_60000_80000", "\u20ac60,000 - \u20ac80,000"], ["EUR_80000_OR_MORE", "\u20ac80,000 or more"]];
-const SENIORITY_OPTIONS: Array<[string, string]> = [["JUNIOR_ENTRY", "Entry Level"], ["MID_LEVEL", "Mid Level"], ["SENIOR", "Senior Level"]];
-const DEFAULT_CATEGORIES: string[] = ["Accounting", "IT", "Sales", "Marketing", "Operations"];
-
-function fmtDate(iso: string | null) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
 export default function JobForm(props: Props) {
   const router = useRouter();
 
   const readOnly = props.role === "CLIENT";
-  const canEdit = props.role !== "CLIENT";
+
+  // ✅ Make jobId stable & safe for TS
+  const jobId = props.mode === "edit" ? props.jobId : null;
 
   const [loading, setLoading] = useState(props.mode === "edit");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [companyId, setCompanyId] = useState("");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [basis, setBasis] = useState("");
+  const [seniority, setSeniority] = useState("");
+  const [salaryBand, setSalaryBand] = useState("");
+  const [status, setStatus] = useState<JobStatus>("ACTIVE");
 
-  const [companyId, setCompanyId] = useState<string>("");
-  const [jobRef, setJobRef] = useState<string>("");
-  const [positionTitle, setPositionTitle] = useState<string>("");
-  const [jobDescription, setJobDescription] = useState<string>("");
-  const [location, setLocation] = useState<string>("");
+  const canEditStatus = props.role === "ADMIN" || props.role === "OPS";
 
-  const [jobBasis, setJobBasis] = useState<string[]>([]);
-  const [salaryBands, setSalaryBands] = useState<string[]>([]);
-  const [seniority, setSeniority] = useState<"SENIOR" | "MID_LEVEL" | "JUNIOR_ENTRY">("MID_LEVEL");
-  const [categories, setCategories] = useState<string[]>([]);
+  const statusBadge = useMemo(() => {
+    return status === "ACTIVE" ? "badge" : "badge";
+  }, [status]);
 
-  const [status, setStatus] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
-  const [inactivatedReason, setInactivatedReason] = useState<string>("");
-
-  const [metaCreatedAt, setMetaCreatedAt] = useState<string | null>(null);
-  const [metaUpdatedAt, setMetaUpdatedAt] = useState<string | null>(null);
-  const [metaInactivatedAt, setMetaInactivatedAt] = useState<string | null>(null);
-
+  // Load company dropdown options
   useEffect(() => {
     let cancelled = false;
 
@@ -85,326 +66,206 @@ export default function JobForm(props: Props) {
         const res = await fetch("/api/companies/options", { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "Failed to load companies");
-        if (!cancelled) setCompanyOptions(json?.items ?? []);
-      } catch {
-        if (!cancelled) setCompanyOptions([]);
+        if (!cancelled) setCompanies(json.options ?? []);
+      } catch (e: any) {
+        if (!cancelled) setErr(e?.message ?? "Failed to load companies");
       }
     }
 
     loadCompanies();
-
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Load job when edit
   useEffect(() => {
-    if (props.mode !== "edit") {
-      // defaults for create
-      setCategories(DEFAULT_CATEGORIES.slice(0, 2));
-      return;
-    }
+    if (!jobId) return;
 
     let cancelled = false;
 
-    async function load() {
+    async function loadJob() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`/api/jobs/${props.jobId}`, { cache: "no-store" });
+        const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "Failed to load job");
 
-        const job: Job = json.job;
+        const j: Job = json.job;
 
-        if (!cancelled) {
-          setCompanyId(job.company_id);
-          setJobRef(job.job_ref ?? "");
-          setPositionTitle(job.position_title);
-          setJobDescription(job.job_description);
-          setLocation(job.location ?? "");
+        if (cancelled) return;
 
-          setJobBasis(job.job_basis ?? []);
-          setSalaryBands(job.salary_bands ?? []);
-          setSeniority(job.seniority);
-          setCategories(job.categories ?? []);
-
-          setStatus(job.status);
-          setInactivatedReason(job.inactivated_reason ?? "");
-
-          setMetaCreatedAt(job.created_at);
-          setMetaUpdatedAt(job.updated_at);
-          setMetaInactivatedAt(job.inactivated_at);
-        }
+        setCompanyId(j.company_id);
+        setTitle(j.title);
+        setDescription(j.description ?? "");
+        setBasis(j.basis ?? "");
+        setSeniority(j.seniority ?? "");
+        setSalaryBand(j.salary_band ?? "");
+        setStatus(j.status);
       } catch (e: any) {
-        if (!cancelled) setErr(e?.message ?? "Unknown error");
+        if (!cancelled) setErr(e?.message ?? "Failed to load job");
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
-    load();
-
+    loadJob();
     return () => {
       cancelled = true;
     };
-  }, [props]);
+  }, [jobId]);
 
-  const companyLabel = useMemo(() => {
-    const c = companyOptions.find((x) => x.id === companyId);
-    return c ? `${c.ref_id} • ${c.name}` : "";
-  }, [companyOptions, companyId]);
-
-  function toggleArrayValue(arr: string[], value: string) {
-    if (arr.includes(value)) return arr.filter((x) => x !== value);
-    return [...arr, value];
-  }
-
-  async function save(desiredStatus?: "ACTIVE" | "INACTIVE") {
-    if (!canEdit) return;
-
-    setSaving(true);
+  async function onSave() {
     setErr(null);
     setOkMsg(null);
 
+    if (readOnly) {
+      setErr("You do not have permission to edit jobs.");
+      return;
+    }
+
+    if (!companyId) {
+      setErr("Company is required.");
+      return;
+    }
+    if (title.trim().length < 2) {
+      setErr("Title is required (min 2 characters).");
+      return;
+    }
+
+    setSaving(true);
+
     try {
-      const finalStatus = desiredStatus ?? status;
-
-      if (!companyId) throw new Error("Please select a Company");
-      if (positionTitle.trim().length < 2) throw new Error("Position Title is required");
-      if (jobDescription.trim().length < 20) throw new Error("Job Description must be at least 20 characters");
-      if (!seniority) throw new Error("Seniority is required");
-
-      if (finalStatus === "INACTIVE" && inactivatedReason.trim().length < 3) {
-        throw new Error("Inactivation reason is required (min 3 characters)");
-      }
-
       const payload = {
         company_id: companyId,
-        job_ref: jobRef.trim() || null,
-        position_title: positionTitle.trim(),
-        job_description: jobDescription.trim(),
-        location: location.trim() || null,
-        job_basis: jobBasis,
-        salary_bands: salaryBands,
-        seniority,
-        categories,
-        status: finalStatus,
-        inactivated_reason: finalStatus === "INACTIVE" ? inactivatedReason.trim() : null
+        title: title.trim(),
+        description: description.trim() || null,
+        basis: basis.trim() || null,
+        seniority: seniority.trim() || null,
+        salary_band: salaryBand.trim() || null,
+        status: canEditStatus ? status : undefined,
       };
 
-      const url = props.mode === "create" ? "/api/jobs" : `/api/jobs/${props.jobId}`;
+      const url = props.mode === "create" ? "/api/jobs" : `/api/jobs/${jobId ?? ""}`;
       const method = props.mode === "create" ? "POST" : "PUT";
+
+      if (props.mode === "edit" && !jobId) throw new Error("Missing jobId for edit mode");
 
       const res = await fetch(url, {
         method,
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({} as any));
       if (!res.ok) throw new Error(json?.error || "Save failed");
-
-      setOkMsg(props.mode === "create" ? "Job created." : "Saved.");
 
       if (props.mode === "create") {
         const newId = json?.job?.id;
+        setOkMsg("Job created.");
         if (newId) {
           router.push(`/jobs/${newId}`);
           router.refresh();
-        } else {
-          router.push("/jobs");
-          router.refresh();
+          return;
         }
+        router.push("/jobs");
+        router.refresh();
       } else {
-        setStatus(finalStatus);
+        setOkMsg("Saved.");
         router.refresh();
       }
     } catch (e: any) {
-      setErr(e?.message ?? "Unknown error");
+      setErr(e?.message ?? "Save failed");
     } finally {
       setSaving(false);
     }
   }
 
+  if (loading) return <div style={{ color: "var(--muted)" }}>Loading…</div>;
+
   return (
-    <div>
-      {err ? <div className="notice" style={{ marginBottom: 12 }}>{err}</div> : null}
-      {okMsg ? <div className="notice good" style={{ marginBottom: 12 }}>{okMsg}</div> : null}
+    <div className="grid" style={{ gap: 14 }}>
+      {err && <div className="notice bad">{err}</div>}
+      {okMsg && <div className="notice">{okMsg}</div>}
 
-      {loading ? <div className="sub">Loading...</div> : null}
-
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+      <div className="grid cols-2">
         <div>
-          <div className="label">Company</div>
+          <label style={{ fontSize: 13, color: "var(--muted)" }}>Company</label>
           <select
             className="input"
             value={companyId}
+            disabled={readOnly || props.mode === "edit"} /* lock company on edit */
             onChange={(e) => setCompanyId(e.target.value)}
-            disabled={readOnly || props.mode === "edit"}
           >
-            <option value="">{props.role === "CLIENT" ? "Your companies" : "Select a company"}</option>
-            {companyOptions.map((c) => (
+            <option value="">Select a company…</option>
+            {companies.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.ref_id} • {c.name}
+                {c.ref_id} — {c.name}
               </option>
             ))}
           </select>
-          {props.mode === "edit" ? <div className="sub">Company: {companyLabel}</div> : null}
+          <small>{props.mode === "edit" ? "Company cannot be changed after creation." : "Select the company for this job."}</small>
         </div>
 
         <div>
-          <div className="label">Job Ref (optional)</div>
-          <input className="input" value={jobRef} onChange={(e) => setJobRef(e.target.value)} disabled={readOnly} />
-          <div className="sub">Internal reference if you use one (optional).</div>
-        </div>
-
-        <div>
-          <div className="label">Position Title</div>
-          <input className="input" value={positionTitle} onChange={(e) => setPositionTitle(e.target.value)} disabled={readOnly} />
-        </div>
-
-        <div>
-          <div className="label">Location (optional)</div>
-          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} disabled={readOnly} />
-        </div>
-
-        <div style={{ gridColumn: "1 / -1" }}>
-          <div className="label">Job Description</div>
-          <textarea
+          <label style={{ fontSize: 13, color: "var(--muted)" }}>Status</label>
+          <select
             className="input"
-            style={{ minHeight: 160 }}
-            value={jobDescription}
-            onChange={(e) => setJobDescription(e.target.value)}
-            disabled={readOnly}
-          />
-          <div className="sub">Minimum 20 characters. Plain text for MVP.</div>
-        </div>
-
-        <div>
-          <div className="label">Seniority</div>
-          <select className="input" value={seniority} onChange={(e) => setSeniority(e.target.value as any)} disabled={readOnly}>
-            {SENIORITY_OPTIONS.map(([v, label]) => (
-              <option key={v} value={v}>
-                {label}
-              </option>
-            ))}
+            value={status}
+            disabled={readOnly || !canEditStatus}
+            onChange={(e) => setStatus(e.target.value as JobStatus)}
+          >
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="INACTIVE">INACTIVE</option>
           </select>
-        </div>
-
-        <div>
-          <div className="label">Categories</div>
-          <div className="sub" style={{ marginBottom: 8 }}>
-            Sample list for now (you will provide the real list later).
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            {DEFAULT_CATEGORIES.map((c) => (
-              <label key={c} className="btn" style={{ justifyContent: "flex-start" }}>
-                <input
-                  type="checkbox"
-                  checked={categories.includes(c)}
-                  onChange={() => setCategories((prev) => toggleArrayValue(prev, c))}
-                  disabled={readOnly}
-                />
-                <span>{c}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <div className="label">Job Basis</div>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            {JOB_BASIS_OPTIONS.map(([v, label]) => (
-              <label key={v} className="btn" style={{ justifyContent: "flex-start" }}>
-                <input
-                  type="checkbox"
-                  checked={jobBasis.includes(v)}
-                  onChange={() => setJobBasis((prev) => toggleArrayValue(prev, v))}
-                  disabled={readOnly}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="label" style={{ marginTop: 12 }}>Salary Bands</div>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            {SALARY_BANDS_OPTIONS.map(([v, label]) => (
-              <label key={v} className="btn" style={{ justifyContent: "flex-start" }}>
-                <input
-                  type="checkbox"
-                  checked={salaryBands.includes(v)}
-                  onChange={() => setSalaryBands((prev) => toggleArrayValue(prev, v))}
-                  disabled={readOnly}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ gridColumn: "1 / -1" }}>
-          <div className="hr" style={{ margin: "12px 0" }} />
-        </div>
-
-        <div>
-          <div className="label">Status</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className={`pill ${status === "ACTIVE" ? "good" : "warn"}`}>{status}</span>
-            {props.mode === "edit" ? (
-              <span className="sub">
-                {status === "ACTIVE"
-                  ? "Auto-inactive after 60 days of inactivity (based on updated date)."
-                  : `Inactive since: ${fmtDate(metaInactivatedAt)}`}
-              </span>
-            ) : null}
-          </div>
-
-          {status === "INACTIVE" ? (
-            <div style={{ marginTop: 10 }}>
-              <div className="label">Inactivation reason</div>
-              <input
-                className="input"
-                value={inactivatedReason}
-                onChange={(e) => setInactivatedReason(e.target.value)}
-                disabled={readOnly}
-                placeholder="e.g. Job filled, on hold, cancelled..."
-              />
-            </div>
-          ) : null}
-
-          {props.mode === "edit" && canEdit ? (
-            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-              {status === "ACTIVE" ? (
-                <button className="btn warn" disabled={saving} onClick={() => save("INACTIVE")}>
-                  Deactivate
-                </button>
-              ) : (
-                <button className="btn good" disabled={saving} onClick={() => save("ACTIVE")}>
-                  Activate
-                </button>
-              )}
-            </div>
-          ) : null}
-        </div>
-
-        <div>
-          <div className="label">Metadata</div>
-          <div className="sub">Created: {fmtDate(metaCreatedAt)}</div>
-          <div className="sub">Updated: {fmtDate(metaUpdatedAt)}</div>
-          <div className="sub" style={{ marginTop: 10 }}>
-            Applicants: <span className="badge">Coming soon (Phase 3)</span>
-          </div>
+          <small>{canEditStatus ? "Admins/Ops can change status." : "Status managed by Admin/Ops."}</small>
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-        {canEdit ? (
-          <button className="btn primary" disabled={saving || loading} onClick={() => save()}>
-            {saving ? "Saving..." : props.mode === "create" ? "Create Job" : "Save changes"}
+      <div>
+        <label style={{ fontSize: 13, color: "var(--muted)" }}>Job title</label>
+        <input className="input" value={title} disabled={readOnly} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+
+      <div>
+        <label style={{ fontSize: 13, color: "var(--muted)" }}>Job description</label>
+        <textarea
+          className="input"
+          value={description}
+          disabled={readOnly}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={8}
+          style={{ resize: "vertical" }}
+        />
+      </div>
+
+      <div className="grid cols-3">
+        <div>
+          <label style={{ fontSize: 13, color: "var(--muted)" }}>Basis</label>
+          <input className="input" value={basis} disabled={readOnly} onChange={(e) => setBasis(e.target.value)} placeholder="Full-Time" />
+        </div>
+
+        <div>
+          <label style={{ fontSize: 13, color: "var(--muted)" }}>Seniority</label>
+          <input className="input" value={seniority} disabled={readOnly} onChange={(e) => setSeniority(e.target.value)} placeholder="Mid Level" />
+        </div>
+
+        <div>
+          <label style={{ fontSize: 13, color: "var(--muted)" }}>Salary band</label>
+          <input className="input" value={salaryBand} disabled={readOnly} onChange={(e) => setSalaryBand(e.target.value)} placeholder="€30,000 - €45,000" />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        {!readOnly && (
+          <button className="btn primary" onClick={onSave} disabled={saving}>
+            {saving ? "Saving…" : props.mode === "create" ? "Create job" : "Save changes"}
           </button>
-        ) : null}
+        )}
+        <button className="btn" onClick={() => router.push("/jobs")} disabled={saving}>
+          Back
+        </button>
       </div>
     </div>
   );
