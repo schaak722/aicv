@@ -1,8 +1,8 @@
 import CompanyForm from "../_components/CompanyForm";
-import { getUserRoleOrRedirect } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 
 export default async function CompanyEditPage({ params }: { params: Promise<{ id: string }> }) {
-  const { role } = await getUserRoleOrRedirect();
+  const user = await requireUser(); // redirects if not logged in
   const { id } = await params;
 
   return (
@@ -16,7 +16,7 @@ export default async function CompanyEditPage({ params }: { params: Promise<{ id
         </div>
 
         <div style={{ padding: 18 }}>
-          <CompanyForm mode="edit" role={role} companyId={id} />
+          <CompanyForm mode="edit" role={user.role} companyId={id} />
         </div>
       </div>
     </div>
