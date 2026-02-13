@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 type AppRole = "ADMIN" | "OPS" | "CLIENT";
 
@@ -9,219 +9,135 @@ type CompanyRow = {
   id: string;
   ref_id: string;
   name: string;
+  email: string | null;
   industry: string | null;
   website: string | null;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-  logo_mime: string | null;
-  has_logo: boolean;
-  derived_status: "ACTIVE" | "INACTIVE";
+  derived_status?: "ACTIVE" | "INACTIVE"; // from API
 };
-
-type ApiResponse = {
-  items: CompanyRow[];
-  total: number;
-  page: number;
-  pageSize: number;
-  error?: string;
-};
-
-function highlight(text: string, q: string) {
-  if (!q || q.length < 2) return text;
-  const idx = text.toLowerCase().indexOf(q.toLowerCase());
-  if (idx === -1) return text;
-  const before = text.slice(0, idx);
-  const mid = text.slice(idx, idx + q.length);
-  const after = text.slice(idx + q.length);
-  return `${before}__H__${mid}__H__${after}`;
-}
-
-function renderHighlighted(h: string) {
-  const safe = h.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-  const html = safe
-    .replaceAll("__H__", "<mark>")
-    .replace("</mark><mark>", "")
-    .replaceAll(
-      "<mark>",
-      '<mark style="background:rgba(91,140,255,0.25); color:inherit; padding:0 2px; border-radius:4px;">'
-    )
-    .replaceAll("</mark>", "</mark>");
-
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
-}
 
 export default function CompaniesClient({ role }: { role: AppRole }) {
-  const canEdit = role !== "CLIENT";
-
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
-  const [sort, setSort] = useState<"name" | "ref_id" | "created_at">("name");
-  const [dir, setDir] = useState<"asc" | "desc">("asc");
-  const [page, setPage] = useState(1);
-  const pageSize = 25;
-
   const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<CompanyRow[]>([]);
-  const [total, setTotal] = useState(0);
   const [err, setErr] = useState<string | null>(null);
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState<"" | "ACTIVE" | "INACTIVE">("");
+  const [rows, setRows] = useState<CompanyRow[]>([]);
 
-  const queryString = useMemo(() => {
-    const sp = new URLSearchParams();
-    if (q.trim()) sp.set("q", q.trim());
-    if (status !== "ALL") sp.set("status", status);
-    sp.set("sort", sort);
-    sp.set("dir", dir);
-    sp.set("page", String(page));
-    sp.set("pageSize", String(pageSize));
-    return sp.toString();
-  }, [q, status, sort, dir, page]);
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("q", q.trim());
+      if (status) params.set("derived_status", status);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setErr(null);
-      try {
-        const res = await fetch(`/api/companies?${queryString}`, { cache: "no-store" });
-        const json: ApiResponse = await res.json();
-        if (!res.ok) throw new Error(json?.error || "Failed to load companies");
-        if (!cancelled) {
-          setItems(json.items ?? []);
-          setTotal(json.total ?? 0);
-        }
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message ?? "Unknown error");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      const res = await fetch(`/api/companies?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to load companies");
+      setRows(json.companies ?? []);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load companies");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [queryString]);
-
-  // Reset to page 1 if filters/search changed
   useEffect(() => {
-    setPage(1);
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status, sort, dir]);
+  }, [status]);
 
-  const rows = useMemo(() => {
-    return items.map((c) => ({
-      ...c,
-      _refHighlighted: highlight(c.ref_id, q),
-      _nameHighlighted: highlight(c.name, q),
-      _industryHighlighted: highlight(c.industry ?? "", q)
-    }));
-  }, [items, q]);
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return rows;
+    return rows.filter((c) => (c.name ?? "").toLowerCase().includes(s) || (c.ref_id ?? "").toLowerCase().includes(s));
+  }, [rows, q]);
 
   return (
-    <div>
-      <div className="grid" style={{ gridTemplateColumns: "1fr 170px 180px 180px auto", alignItems: "end" }}>
-        <div>
-          <div className="label">Search</div>
-          <input className="input" placeholder="Name, ref id, industry..." value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+    <div className="grid" style={{ gap: 12 }}>
+      {err && <div className="notice bad">{err}</div>}
 
-        <div>
-          <div className="label">Status</div>
-          <select className="input" value={status} onChange={(e) => setStatus(e.target.value as any)}>
-            <option value="ALL">All</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-          </select>
-        </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <input
+          className="input"
+          placeholder="Search by name or Ref ID…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ maxWidth: 420 }}
+        />
 
-        <div>
-          <div className="label">Sort</div>
-          <select className="input" value={sort} onChange={(e) => setSort(e.target.value as any)}>
-            <option value="name">Name</option>
-            <option value="ref_id">Ref ID</option>
-            <option value="created_at">Created</option>
-          </select>
-        </div>
+        <select className="input" style={{ maxWidth: 200 }} value={status} onChange={(e) => setStatus(e.target.value as any)}>
+          <option value="">All (derived)</option>
+          <option value="ACTIVE">Active (has active job)</option>
+          <option value="INACTIVE">Inactive (no active jobs)</option>
+        </select>
 
-        <div>
-          <div className="label">Direction</div>
-          <select className="input" value={dir} onChange={(e) => setDir(e.target.value as any)}>
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
-          </select>
-        </div>
+        <button className="btn" onClick={load} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          {canEdit ? (
-            <Link className="btn primary" href="/companies/new">
-              + New Company
-            </Link>
-          ) : null}
-        </div>
+        {role !== "CLIENT" && (
+          <Link className="btn primary" href="/companies/new">
+            + New company
+          </Link>
+        )}
       </div>
 
-      {err ? <div className="notice" style={{ marginTop: 12 }}>{err}</div> : null}
-      {loading ? <div className="sub" style={{ marginTop: 12 }}>Loading...</div> : null}
-
-      <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <div className="card" style={{ padding: 12 }}>
         <table className="table">
           <thead>
             <tr>
-              <th>Ref</th>
-              <th>Name</th>
-              <th>Status</th>
+              <th style={{ width: 54 }}></th>
+              <th>Ref ID</th>
+              <th>Company</th>
+              <th>Email</th>
               <th>Industry</th>
-              <th style={{ width: 120 }} />
+              <th>Derived status</th>
+              <th style={{ width: 120 }}></th>
             </tr>
           </thead>
-          <tbody>
-            {rows.length === 0 && !loading ? (
-              <tr>
-                <td colSpan={5} className="sub">
-                  No companies found.
-                </td>
-              </tr>
-            ) : null}
 
-            {rows.map((c) => (
+          <tbody>
+            {filtered.map((c) => (
               <tr key={c.id}>
-                <td>{renderHighlighted(c._refHighlighted)}</td>
                 <td>
-                  {renderHighlighted(c._nameHighlighted)}
-                  {c.website ? <div className="sub">{c.website}</div> : null}
+                  <img
+                    src={`/api/companies/${c.id}/logo`}
+                    alt=""
+                    style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover", border: "1px solid var(--line)" }}
+                    onError={(e) => {
+                      // Hide broken image and keep layout stable
+                      (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                    }}
+                  />
                 </td>
+
+                <td>{c.ref_id}</td>
+                <td style={{ fontWeight: 650 }}>{c.name}</td>
+                <td>{c.email ?? "—"}</td>
+                <td>{c.industry ?? "—"}</td>
+
                 <td>
-                  <span className={`pill ${c.derived_status === "ACTIVE" ? "good" : "warn"}`}>{c.derived_status}</span>
+                  <span className="badge">{c.derived_status ?? "—"}</span>
                 </td>
-                <td className="sub">{renderHighlighted(c._industryHighlighted)}</td>
+
                 <td style={{ textAlign: "right" }}>
                   <Link className="btn" href={`/companies/${c.id}`}>
-                    {role === "CLIENT" ? "View" : "Open"}
+                    Open
                   </Link>
                 </td>
               </tr>
             ))}
+
+            {!loading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} style={{ color: "var(--muted)", padding: 14 }}>
+                  No companies found.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
-        <div className="sub">
-          Page {page} of {totalPages} • {total} total
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-            Prev
-          </button>
-          <button className="btn" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-            Next
-          </button>
-        </div>
       </div>
     </div>
   );
