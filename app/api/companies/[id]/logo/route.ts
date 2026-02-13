@@ -34,20 +34,24 @@ export async function GET(_req: NextRequest, { params }: RouteContext<{ id: stri
     if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const { data, error } = await admin
-    .rpc<CompanyLogoRpcRow>("get_company_logo", { p_company_id: parsedParams.data.id })
-    .maybeSingle();
+  const { data, error } = await admin.rpc("get_company_logo", {
+    p_company_id: parsedParams.data.id,
+  });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  if (!data?.logo_base64 || !data?.logo_mime) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const bytes = Buffer.from(String(data.logo_base64), "base64");
+  const row = (Array.isArray(data) ? data[0] : data) as CompanyLogoRpcRow | null;
+
+  if (!row?.logo_base64 || !row?.logo_mime)
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const bytes = Buffer.from(String(row.logo_base64), "base64");
 
   return new NextResponse(bytes, {
     status: 200,
     headers: {
-      "Content-Type": String(data.logo_mime),
-      "Cache-Control": "public, max-age=300"
-    }
+      "Content-Type": String(row.logo_mime),
+      "Cache-Control": "public, max-age=300",
+    },
   });
 }
