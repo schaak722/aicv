@@ -182,3 +182,6 @@ small{ color: var(--muted); }
   .sidebar{ display:none; }
   .grid.cols-2, .grid.cols-3{ grid-template-columns: 1fr; }
 }
+
+
+mark{ background: rgba(91,140,255,0.22); color: var(--text); padding: 0 3px; border-radius: 6px; }

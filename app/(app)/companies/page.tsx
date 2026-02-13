@@ -1,19 +1,20 @@
 import Topbar from "@/components/Topbar";
+import { requireUser } from "@/lib/auth";
+import CompaniesClient from "./_components/CompaniesClient";
 
-export default function Page() {
+export default async function CompaniesPage() {
+  const { role } = await requireUser();
+
   return (
     <div className="container">
       <div className="card">
-        <Topbar title="Companies" subtitle="Create and manage company profiles (Ref ID, Name, Logo, Description, Industry, Website)." right={<span className="badge">Placeholder</span>} />
+        <Topbar
+          title="Companies"
+          subtitle={role === "CLIENT" ? "Your assigned companies" : "Manage company profiles"}
+          right={<span className="badge">Phase 1</span>}
+        />
         <div style={{ padding: 18 }}>
-          <div className="notice" style={{ marginBottom: 12 }}>
-            This screen is intentionally scaffolded in Phase 0.
-          </div>
-          <ul style={{ color: "var(--muted)", lineHeight: 1.7 }}>
-            <li>Phase 1 will implement Companies API + list + create/edit forms.</li>
-            <li>Logo stored in Postgres BYTEA; server resizes to 70×70.</li>
-            <li>Ref ID format enforced: AAA000 (e.g., KMP001).</li>
-          </ul>
+          <CompaniesClient role={role} />
         </div>
       </div>
     </div>

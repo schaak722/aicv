@@ -50,7 +50,7 @@ export default function Sidebar({
       </nav>
 
       <div style={{ marginTop: 18, padding: "10px 10px" }} className="notice">
-        <div style={{ fontWeight: 650, color: "var(--text)" }}>Phase 0</div>
+        <div style={{ fontWeight: 650, color: "var(--text)" }}>Phase 1</div>
         <div style={{ marginTop: 4 }}>
           Auth + schema + UI scaffold only. Data pages are placeholders.
         </div>

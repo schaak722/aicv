@@ -11,7 +11,7 @@ export async function requireUser() {
     redirect("/login");
   }
 
-  const { data: profile, error: profErr } = await supabase
+  const { data: profile } = await supabase
     .from("app_users")
     .select("role, display_name")
     .eq("id", userData.user.id)
@@ -24,9 +24,9 @@ export async function requireUser() {
   return { user: userData.user, role, displayName };
 }
 
-export function requireRole(role: AppRole, actual: AppRole) {
+export function requireRole(required: AppRole, actual: AppRole) {
   const order: Record<AppRole, number> = { CLIENT: 1, OPS: 2, ADMIN: 3 };
-  if (order[actual] < order[role]) {
+  if (order[actual] < order[required]) {
     redirect("/dashboard");
   }
 }
