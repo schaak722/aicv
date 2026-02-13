@@ -1,17 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { getApiAuth } from "@/lib/server/apiAuth";
+import type { RouteContext } from "@/lib/server/routeTypes";
 
 export const runtime = "nodejs";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
 
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: RouteContext<{ id: string }>) {
   const auth = await getApiAuth();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const parsedParams = ParamsSchema.safeParse(ctx.params);
+  const parsedParams = ParamsSchema.safeParse(await params);
   if (!parsedParams.success) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
   const admin = createAdminSupabase();

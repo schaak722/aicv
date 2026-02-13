@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { getApiAuth } from "@/lib/server/apiAuth";
+import type { RouteContext } from "@/lib/server/routeTypes";
 
 export const runtime = "nodejs";
 
@@ -46,11 +47,11 @@ async function canAccessCompany(admin: ReturnType<typeof createAdminSupabase>, u
   return Boolean(data);
 }
 
-export async function GET(req: Request, ctx: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: RouteContext<{ id: string }>) {
   const auth = await getApiAuth();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const parsedParams = ParamsSchema.safeParse(ctx.params);
+  const parsedParams = ParamsSchema.safeParse(await params);
   if (!parsedParams.success) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
   const admin = createAdminSupabase();
@@ -71,12 +72,12 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   });
 }
 
-export async function PUT(req: Request, ctx: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: RouteContext<{ id: string }>) {
   const auth = await getApiAuth();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
   if (auth.role === "CLIENT") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const parsedParams = ParamsSchema.safeParse(ctx.params);
+  const parsedParams = ParamsSchema.safeParse(await params);
   if (!parsedParams.success) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
   const contentType = req.headers.get("content-type") || "";
